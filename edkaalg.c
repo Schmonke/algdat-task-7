@@ -57,6 +57,9 @@ typedef struct graph
 {
     node *nodes;
     int node_count;
+    int edge_count;
+    int src_node_id;
+    int sink_node_id;
 } graph;
 
 /**
@@ -212,21 +215,56 @@ void graph_free(graph *g)
     free(g);
 }
 
+int compare_arrays(int *outer_array, int *inner_array, int length)
+{
+    int result = -1;
+    bool *wrong = false;
+    for (int i = 0; i < length; i++)
+    {
+        //printf("Value %d in space %d\n", outer_array[i], i);
+        wrong = false;
+        for (int j = 0; j < length; j++)
+        {
+            if (outer_array[i] == inner_array[j]) 
+            {
+                wrong = true;
+                break;
+            }
+        }
+        if (!wrong) 
+        {
+            result = outer_array[i];
+            break;
+        }
+    }
+    return result;
+}
+
+int find_src_node(int *src_nodes, int *sink_nodes, int length)
+{
+    return compare_arrays(src_nodes, sink_nodes, length);
+}
+
+int find_sink_node(int *src_nodes, int *sink_nodes, int length)
+{
+    return compare_arrays(sink_nodes, src_nodes, length);
+}
+
 /**
  * Use queue as holder of nodes to use. 
  * It represents the order the nodes are visited. 
  */
-void bfsv2(graph *g, int srcNodeId)
+void bfsv2(graph *g)
 {
     graph_reset_flags(g);
 
     queue *q = new_queue();
 
     // push initial node onto queue for searching
-    node *src = &g->nodes[srcNodeId];
+    node *src = &g->nodes[g->src_node_id];
     src->visited = true;
 
-    queue_push(q, srcNodeId);
+    queue_push(q, g->src_node_id);
 
     // look over nodes
     while (true)
@@ -321,6 +359,7 @@ graph *parse_graphfile(const char *graphfile)
 {
     int i = 0;
     int length;
+    int count = 0;
     char *data = mmap_file(graphfile, &length);
     if (data == MAP_FAILED)
     {
@@ -335,6 +374,7 @@ graph *parse_graphfile(const char *graphfile)
 
     graph *g = malloc(sizeof(graph));
     g->node_count = node_count;
+    g->edge_count = edge_count;
     g->nodes = calloc(node_count, sizeof(node));
 
     for (int i = 0; i < node_count; i++)
@@ -342,39 +382,64 @@ graph *parse_graphfile(const char *graphfile)
         g->nodes[i].node_number = i;
     }
 
+    int *src_nodes = malloc(sizeof(int) * edge_count);
+    int *sink_nodes = malloc(sizeof(int) * edge_count);
+
     while (i < length)
     {
         int node_id = atoi(&data[i]);
-
+        src_nodes[count] = node_id;
         if (find_next_token(data, length, &i))
             continue;
+
         int edge_dst_id = atoi(&data[i]);
+        sink_nodes[count] = edge_dst_id;
+        
+        if (find_next_token(data, length, &i))
+            continue;
+        count++;
         int edge_capacity = atoi(&data[i]);
+        //printf("%d, %d, %d\n", node_id, edge_dst_id, edge_capacity);
         if (node_id < node_count && edge_dst_id < node_count)
         {
             node *n = &g->nodes[node_id];
             n->node_number = node_id;
             edge_add(n, edge_dst_id, edge_capacity);
         }
-
         if (find_next_token(data, length, &i))
             continue;
+        
     }
 
+    g->src_node_id = find_src_node(src_nodes, sink_nodes, g->edge_count);
+    g->sink_node_id = find_sink_node(src_nodes, sink_nodes, g->edge_count);
+
+    free(src_nodes);
+    free(sink_nodes);
     munmap(data, length);
     return g;
 }
 
+// int find_sink_node(graph *g)
+// {
+//     int result_id = -1;
+//     for (int i = 0; i < g->node_count; i++)
+//     {
+//         node *n = &g->nodes[i];
+//         if (n->edges == NULL) result_id = n->node_number;
+//     }
+//     return result_id;
+// }
+
 int main(int argc, const char *argv[])
 {
-    const int src_node = argc > 1 ? atoi(argv[1]) : -1;
-    const char *graphfile = argc > 2 ? argv[2] : NULL;
+    const char *graphfile = argc > 1 ? argv[1] : NULL;
 
-    if (src_node == -1 || graphfile == NULL)
+    if (graphfile == NULL)
     {
         printf(
             "You must provide a graph file and optionally a name file.\n"
-            "Usage: ./graph <src-node> <graphfile>\n");
+            "Usage: ./edkaalg <graphfile>\n");
         return 1;
     }
 
@@ -385,8 +450,10 @@ int main(int argc, const char *argv[])
         return 1;
     }
 
-    bfsv2(graph, src_node);
+    bfsv2(graph);
     print_bfs_result(graph);
+
+    printf("\nSource node: %d\nSink node: %d\n", graph->src_node_id, graph->sink_node_id);
 
     graph_free(graph);
 
