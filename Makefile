@@ -1,2 +1,2 @@
 build:
-	gcc edkaalg.c -o edkaalg
+	gcc maxflow.c -o maxflow

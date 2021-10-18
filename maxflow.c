@@ -225,13 +225,13 @@ int compare_arrays(int *outer_array, int *inner_array, int length)
         wrong = false;
         for (int j = 0; j < length; j++)
         {
-            if (outer_array[i] == inner_array[j]) 
+            if (outer_array[i] == inner_array[j])
             {
                 wrong = true;
                 break;
             }
         }
-        if (!wrong) 
+        if (!wrong)
         {
             result = outer_array[i];
             break;
@@ -394,7 +394,7 @@ graph *parse_graphfile(const char *graphfile)
 
         int edge_dst_id = atoi(&data[i]);
         sink_nodes[count] = edge_dst_id;
-        
+
         if (find_next_token(data, length, &i))
             continue;
         count++;
@@ -408,7 +408,6 @@ graph *parse_graphfile(const char *graphfile)
         }
         if (find_next_token(data, length, &i))
             continue;
-        
     }
 
     g->src_node_id = find_src_node(src_nodes, sink_nodes, g->edge_count);
@@ -439,7 +438,7 @@ int main(int argc, const char *argv[])
     {
         printf(
             "You must provide a graph file and optionally a name file.\n"
-            "Usage: ./edkaalg <graphfile>\n");
+            "Usage: ./maxflow <graphfile>\n");
         return 1;
     }
 
