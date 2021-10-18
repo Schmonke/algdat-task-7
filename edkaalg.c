@@ -22,6 +22,7 @@ typedef struct edge
 {
     struct edge *next;
     int dst_node_id;
+    int capacity;
 } edge;
 
 /**
@@ -61,9 +62,10 @@ typedef struct graph
 /**
  * Constructor for a new edge
  */
-edge *new_edge(int dst_node_id, edge *next)
+edge *new_edge(int capacity, int dst_node_id, edge *next)
 {
     edge *e = malloc(sizeof(edge));
+    e->capacity = capacity;
     e->dst_node_id = dst_node_id;
     e->next = next;
     return e;
@@ -74,9 +76,9 @@ edge *new_edge(int dst_node_id, edge *next)
  * Adds to front insted of back because its more 
  * efficient and the list order is irelevant. 
  */
-void edge_add(node *n, int dst_node_id)
+void edge_add(node *n, int dst_node_id, int capacity)
 {
-    n->edges = new_edge(dst_node_id, n->edges);
+    n->edges = new_edge(capacity, dst_node_id, n->edges);
 }
 
 /**
@@ -347,11 +349,12 @@ graph *parse_graphfile(const char *graphfile)
         if (find_next_token(data, length, &i))
             continue;
         int edge_dst_id = atoi(&data[i]);
+        int edge_capacity = atoi(&data[i]);
         if (node_id < node_count && edge_dst_id < node_count)
         {
             node *n = &g->nodes[node_id];
             n->node_number = node_id;
-            edge_add(n, edge_dst_id);
+            edge_add(n, edge_dst_id, edge_capacity);
         }
 
         if (find_next_token(data, length, &i))
