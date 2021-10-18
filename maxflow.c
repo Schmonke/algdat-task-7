@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/mman.h>
 
 /* Edge represents connection between two nodes
@@ -30,13 +31,12 @@ typedef struct edge
  */
 typedef struct node
 {
-    char *text;
-    int node_number;
     struct edge *edges;
+    struct edge *inv_edges;
 
     // BFS
     bool visited;
-    int prevNodeId;
+    int prev_node_id;
     int dist;
 } node;
 
@@ -56,10 +56,11 @@ typedef struct queue
 typedef struct graph
 {
     node *nodes;
+    int total_node_count; // includes special nodes
     int node_count;
     int edge_count;
-    int src_node_id;
-    int sink_node_id;
+    int super_source_node_id;
+    int super_sink_node_id;
 } graph;
 
 /**
@@ -79,9 +80,9 @@ edge *new_edge(int capacity, int dst_node_id, edge *next)
  * Adds to front insted of back because its more 
  * efficient and the list order is irelevant. 
  */
-void edge_add(node *n, int dst_node_id, int capacity)
+void edge_add(edge **edges, int dst_node_id, int capacity)
 {
-    n->edges = new_edge(capacity, dst_node_id, n->edges);
+    *edges = new_edge(capacity, dst_node_id, *edges);
 }
 
 /**
@@ -183,17 +184,68 @@ void queue_free(queue *q)
     free(q);
 }
 
+void graph_populate_inverted_edges(graph *g)
+{
+    for (int i = 0; i < g->node_count; i++)
+    {
+        node src_node = g->nodes[i];
+        for (edge *e = src_node.edges; e; e = e->next)
+        {
+            node *dst_node = &g->nodes[e->dst_node_id];
+            bool has_reverse_edge = false;
+            for (edge *e = dst_node->edges; e; e = e->next)
+            {
+                if (e->dst_node_id == i)
+                {
+                    has_reverse_edge = true;
+                    break;
+                }
+            }
+
+            if (!has_reverse_edge)
+            {
+                //printf("Adding inverte edge for src: %d, with dst: %d\n", i, e->dst_node_id);
+                edge_add(&dst_node->inv_edges, i, e->capacity);
+            }
+        }
+    }
+}
+
+void graph_create_super_source(graph *g)
+{
+    node *super_source = &g->nodes[g->super_source_node_id];
+    for (int i = 0; i < g->node_count; i++)
+    {
+        if (g->nodes[i].inv_edges == NULL)
+        {
+            edge_add(&super_source->edges, i, INT_MAX);
+        }
+    }
+}
+
+void graph_create_super_sink(graph *g)
+{
+    for (int i = 0; i < g->node_count; i++)
+    {
+        node *sink_node = &g->nodes[i];
+        if (g->nodes[i].edges == NULL)
+        {
+            edge_add(&sink_node->edges, g->super_sink_node_id, INT_MAX);
+        }
+    }
+}
+
 /**
  * Resets the visited flags on the nodes before starting a search
  * with BFS or DFS/Topo Sort
  */
 void graph_reset_flags(graph *g)
 {
-    for (int i = 0; i < g->node_count; i++)
+    for (int i = 0; i < g->total_node_count; i++)
     {
         g->nodes[i].visited = false;
-        g->nodes[i].prevNodeId = -1;
-        g->nodes[i].dist = 0;
+        g->nodes[i].prev_node_id = -1;
+        g->nodes[i].dist = -1;
     }
 }
 /**
@@ -215,41 +267,6 @@ void graph_free(graph *g)
     free(g);
 }
 
-int compare_arrays(int *outer_array, int *inner_array, int length)
-{
-    int result = -1;
-    bool *wrong = false;
-    for (int i = 0; i < length; i++)
-    {
-        //printf("Value %d in space %d\n", outer_array[i], i);
-        wrong = false;
-        for (int j = 0; j < length; j++)
-        {
-            if (outer_array[i] == inner_array[j])
-            {
-                wrong = true;
-                break;
-            }
-        }
-        if (!wrong)
-        {
-            result = outer_array[i];
-            break;
-        }
-    }
-    return result;
-}
-
-int find_src_node(int *src_nodes, int *sink_nodes, int length)
-{
-    return compare_arrays(src_nodes, sink_nodes, length);
-}
-
-int find_sink_node(int *src_nodes, int *sink_nodes, int length)
-{
-    return compare_arrays(sink_nodes, src_nodes, length);
-}
-
 /**
  * Use queue as holder of nodes to use. 
  * It represents the order the nodes are visited. 
@@ -261,10 +278,10 @@ void bfsv2(graph *g)
     queue *q = new_queue();
 
     // push initial node onto queue for searching
-    node *src = &g->nodes[g->src_node_id];
+    node *src = &g->nodes[g->super_source_node_id];
     src->visited = true;
 
-    queue_push(q, g->src_node_id);
+    queue_push(q, g->super_source_node_id);
 
     // look over nodes
     while (true)
@@ -287,7 +304,7 @@ void bfsv2(graph *g)
             if (target->visited)
                 continue;
 
-            target->prevNodeId = n_id;
+            target->prev_node_id = n_id;
             target->dist = n->dist + 1;
             queue_push(q, targetNodeId);
             target->visited = true;
@@ -301,12 +318,17 @@ void bfsv2(graph *g)
  */
 void print_bfs_result(graph *g)
 {
-    printf("%-5s | %-5s | %-5s\n", "Node", "Prev", "Dist");
+    node super_source = g->nodes[g->super_source_node_id];
+    node super_sink = g->nodes[g->super_sink_node_id];
+
+    printf("%-6s | %-5s | %-5s\n", "Node", "Prev", "Dist");
     for (int i = 0; i < g->node_count; i++)
     {
         node *n = &g->nodes[i];
-        printf("%5d | %5d | %5d\n", n->node_number, n->prevNodeId, n->dist);
+        printf("%6d | %5d | %5d\n", i, n->prev_node_id, n->dist);
     }
+    printf("SOURCE | %5d | %5d\n", super_source.prev_node_id, super_source.dist);
+    printf("  SINK | %5d | %5d\n", super_sink.prev_node_id, super_sink.dist);
 }
 
 /**
@@ -359,7 +381,6 @@ graph *parse_graphfile(const char *graphfile)
 {
     int i = 0;
     int length;
-    int count = 0;
     char *data = mmap_file(graphfile, &length);
     if (data == MAP_FAILED)
     {
@@ -373,62 +394,42 @@ graph *parse_graphfile(const char *graphfile)
     find_next_token(data, length, &i);
 
     graph *g = malloc(sizeof(graph));
+    g->total_node_count = node_count;
     g->node_count = node_count;
     g->edge_count = edge_count;
-    g->nodes = calloc(node_count, sizeof(node));
-
-    for (int i = 0; i < node_count; i++)
-    {
-        g->nodes[i].node_number = i;
-    }
-
-    int *src_nodes = malloc(sizeof(int) * edge_count);
-    int *sink_nodes = malloc(sizeof(int) * edge_count);
+    g->super_source_node_id = g->total_node_count++;
+    g->super_sink_node_id = g->total_node_count++;
+    g->nodes = calloc(g->total_node_count, sizeof(node));
 
     while (i < length)
     {
         int node_id = atoi(&data[i]);
-        src_nodes[count] = node_id;
         if (find_next_token(data, length, &i))
             continue;
 
         int edge_dst_id = atoi(&data[i]);
-        sink_nodes[count] = edge_dst_id;
-
         if (find_next_token(data, length, &i))
             continue;
-        count++;
+
         int edge_capacity = atoi(&data[i]);
         //printf("%d, %d, %d\n", node_id, edge_dst_id, edge_capacity);
         if (node_id < node_count && edge_dst_id < node_count)
         {
             node *n = &g->nodes[node_id];
-            n->node_number = node_id;
-            edge_add(n, edge_dst_id, edge_capacity);
+            edge_add(&n->edges, edge_dst_id, edge_capacity);
         }
         if (find_next_token(data, length, &i))
             continue;
     }
 
-    g->src_node_id = find_src_node(src_nodes, sink_nodes, g->edge_count);
-    g->sink_node_id = find_sink_node(src_nodes, sink_nodes, g->edge_count);
-
-    free(src_nodes);
-    free(sink_nodes);
     munmap(data, length);
+
+    graph_populate_inverted_edges(g);
+    graph_create_super_source(g);
+    graph_create_super_sink(g);
+
     return g;
 }
-
-// int find_sink_node(graph *g)
-// {
-//     int result_id = -1;
-//     for (int i = 0; i < g->node_count; i++)
-//     {
-//         node *n = &g->nodes[i];
-//         if (n->edges == NULL) result_id = n->node_number;
-//     }
-//     return result_id;
-// }
 
 int main(int argc, const char *argv[])
 {
@@ -452,7 +453,7 @@ int main(int argc, const char *argv[])
     bfsv2(graph);
     print_bfs_result(graph);
 
-    printf("\nSource node: %d\nSink node: %d\n", graph->src_node_id, graph->sink_node_id);
+    printf("\nSource node: %d\nSink node: %d\n", graph->super_source_node_id, graph->super_sink_node_id);
 
     graph_free(graph);
 
