@@ -22,8 +22,10 @@
 typedef struct edge
 {
     struct edge *next;
+    struct edge *inverted;
     int dst_node_id;
-    int capacity;
+    int capacity; //When full -> inverted is 0 and vice versa
+    int flow;     //Difference between capacity and flow gives current capacity
 } edge;
 
 /**
@@ -32,7 +34,6 @@ typedef struct edge
 typedef struct node
 {
     struct edge *edges;
-    struct edge *inv_edges;
 
     // BFS
     bool visited;
@@ -72,6 +73,7 @@ edge *new_edge(int capacity, int dst_node_id, edge *next)
     e->capacity = capacity;
     e->dst_node_id = dst_node_id;
     e->next = next;
+    e->inverted = NULL;
     return e;
 }
 
@@ -80,9 +82,11 @@ edge *new_edge(int capacity, int dst_node_id, edge *next)
  * Adds to front insted of back because its more 
  * efficient and the list order is irelevant. 
  */
-void edge_add(edge **edges, int dst_node_id, int capacity)
+edge *edge_add(edge **edges, int dst_node_id, int capacity)
 {
-    *edges = new_edge(capacity, dst_node_id, *edges);
+    edge *e = new_edge(capacity, dst_node_id, *edges);
+    *edges = e;
+    return e;
 }
 
 /**
@@ -188,24 +192,25 @@ void graph_populate_inverted_edges(graph *g)
 {
     for (int i = 0; i < g->node_count; i++)
     {
-        node src_node = g->nodes[i];
-        for (edge *e = src_node.edges; e; e = e->next)
+        node *src_node = &g->nodes[i];
+        for (edge *e = src_node->edges; e; e = e->next)
         {
+            bool has_inverted = false;
             node *dst_node = &g->nodes[e->dst_node_id];
-            bool has_reverse_edge = false;
             for (edge *e = dst_node->edges; e; e = e->next)
             {
                 if (e->dst_node_id == i)
                 {
-                    has_reverse_edge = true;
+                    has_inverted = true;
                     break;
                 }
             }
 
-            if (!has_reverse_edge)
+            if (!has_inverted)
             {
-                //printf("Adding inverte edge for src: %d, with dst: %d\n", i, e->dst_node_id);
-                edge_add(&dst_node->inv_edges, i, e->capacity);
+                edge *inv_edge = edge_add(&dst_node->edges, i, 0);
+                printf("NODE %4d -> NODE %6d | INODE %6d -> INODE %6d\n", i, e->dst_node_id, e->dst_node_id, inv_edge->dst_node_id);
+                e->inverted = inv_edge;
             }
         }
     }
@@ -216,7 +221,18 @@ void graph_create_super_source(graph *g)
     node *super_source = &g->nodes[g->super_source_node_id];
     for (int i = 0; i < g->node_count; i++)
     {
-        if (g->nodes[i].inv_edges == NULL)
+        node n = g->nodes[i];
+        bool has_incoming_edges = false;
+        for (edge *e = n.edges; e != NULL; e = e->next)
+        {
+            if (e->inverted == NULL)
+            {
+                has_incoming_edges = true;
+                break;
+            }
+        }
+
+        if (!has_incoming_edges)
         {
             edge_add(&super_source->edges, i, INT_MAX);
         }
@@ -227,10 +243,20 @@ void graph_create_super_sink(graph *g)
 {
     for (int i = 0; i < g->node_count; i++)
     {
-        node *sink_node = &g->nodes[i];
-        if (g->nodes[i].edges == NULL)
+        node *n = &g->nodes[i];
+        bool has_only_incoming_edges = true;
+        for (edge *e = n->edges; e != NULL; e = e->next)
         {
-            edge_add(&sink_node->edges, g->super_sink_node_id, INT_MAX);
+            if (e->inverted != NULL)
+            {
+                has_only_incoming_edges = false;
+                break;
+            }
+        }
+
+        if (has_only_incoming_edges)
+        {
+            edge_add(&n->edges, g->super_sink_node_id, INT_MAX);
         }
     }
 }
@@ -270,8 +296,10 @@ void graph_free(graph *g)
 /**
  * Use queue as holder of nodes to use. 
  * It represents the order the nodes are visited. 
+ * 
+ * Returns true if the super sink was reached.
  */
-void bfsv2(graph *g)
+bool bfs(graph *g)
 {
     graph_reset_flags(g);
 
@@ -295,7 +323,7 @@ void bfsv2(graph *g)
         n->visited = true;
 
         // look over edges and push to queue
-
+        // TODO: check how much capacity is left :- )
         for (edge *e = n->edges; e; e = e->next) //Stops when all edges of a node are visited.
         {
             int targetNodeId = e->dst_node_id;
@@ -311,6 +339,47 @@ void bfsv2(graph *g)
         }
     }
     queue_free(q);
+
+    return g->nodes[g->super_sink_node_id].visited;
+}
+
+void edmond_karp(graph *g)
+{
+    //Run BFS and log nodes used for the shortest path
+    //Decrease capacity of all used edges in a run, by one.
+    //When an edge's capacity is = 0 the original edge is no longer available.
+    //If an edge's capacity is full, the inverted edge is not available.
+    //When an edge's original capacity decrease, the inverted capacity increase
+    // and vice versa.
+    int max_flow = 0;
+
+    node *sink = &g->nodes[g->super_sink_node_id];
+    node *source = &g->nodes[g->super_source_node_id];
+
+    while (bfs(g))
+    {
+        // Find maximum flow that can yoink through the path.
+        int path_max_flow = INT_MAX;
+        int node_id = sink->prev_node_id;
+        for (node *n = sink; n != source; n = &g->nodes[n->prev_node_id])
+        {
+            // todo: make better pls
+            for (edge *e = n->edges; e != NULL; e = e->next)
+            {
+                if (e->dst_node_id == node_id)
+                {
+                    if (e->capacity < path_max_flow)
+                    {
+                        path_max_flow = e->capacity;
+                    }
+                }
+            }
+            node_id = n->prev_node_id;
+        }
+        // !!update edge capacities!!
+
+        // snacks snax
+    }
 }
 
 /**
@@ -450,7 +519,7 @@ int main(int argc, const char *argv[])
         return 1;
     }
 
-    bfsv2(graph);
+    bfs(graph);
     print_bfs_result(graph);
 
     printf("\nSource node: %d\nSink node: %d\n", graph->super_source_node_id, graph->super_sink_node_id);
