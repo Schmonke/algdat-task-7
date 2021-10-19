@@ -23,6 +23,8 @@ typedef struct edge
 {
     struct edge *next;
     struct edge *inverted;
+    bool is_inverted;
+
     int dst_node_id;
     int capacity; //When full -> inverted is 0 and vice versa
     int flow;     //Difference between capacity and flow gives current capacity
@@ -37,6 +39,7 @@ typedef struct node
 
     // BFS
     bool visited;
+    edge *used_edge;
     int prev_node_id;
     int dist;
 } node;
@@ -74,6 +77,7 @@ edge *new_edge(int capacity, int dst_node_id, edge *next)
     e->dst_node_id = dst_node_id;
     e->next = next;
     e->inverted = NULL;
+    e->is_inverted = false;
     return e;
 }
 
@@ -209,8 +213,10 @@ void graph_populate_inverted_edges(graph *g)
             if (!has_inverted)
             {
                 edge *inv_edge = edge_add(&dst_node->edges, i, 0);
+                inv_edge->is_inverted = true;
                 printf("NODE %4d -> NODE %6d | INODE %6d -> INODE %6d\n", i, e->dst_node_id, e->dst_node_id, inv_edge->dst_node_id);
                 e->inverted = inv_edge;
+                inv_edge->inverted = e;
             }
         }
     }
@@ -225,7 +231,7 @@ void graph_create_super_source(graph *g)
         bool has_incoming_edges = false;
         for (edge *e = n.edges; e != NULL; e = e->next)
         {
-            if (e->inverted == NULL)
+            if (e->is_inverted)
             {
                 has_incoming_edges = true;
                 break;
@@ -247,7 +253,7 @@ void graph_create_super_sink(graph *g)
         bool has_only_incoming_edges = true;
         for (edge *e = n->edges; e != NULL; e = e->next)
         {
-            if (e->inverted != NULL)
+            if (!e->is_inverted)
             {
                 has_only_incoming_edges = false;
                 break;
@@ -271,6 +277,7 @@ void graph_reset_flags(graph *g)
     {
         g->nodes[i].visited = false;
         g->nodes[i].prev_node_id = -1;
+        g->nodes[i].used_edge = NULL;
         g->nodes[i].dist = -1;
     }
 }
@@ -326,12 +333,16 @@ bool bfs(graph *g)
         // TODO: check how much capacity is left :- )
         for (edge *e = n->edges; e; e = e->next) //Stops when all edges of a node are visited.
         {
+            if (e->capacity <= 0)
+                continue;
+
             int targetNodeId = e->dst_node_id;
             node *target = &g->nodes[targetNodeId];
 
             if (target->visited)
                 continue;
 
+            target->used_edge = e;
             target->prev_node_id = n_id;
             target->dist = n->dist + 1;
             queue_push(q, targetNodeId);
@@ -341,45 +352,6 @@ bool bfs(graph *g)
     queue_free(q);
 
     return g->nodes[g->super_sink_node_id].visited;
-}
-
-void edmond_karp(graph *g)
-{
-    //Run BFS and log nodes used for the shortest path
-    //Decrease capacity of all used edges in a run, by one.
-    //When an edge's capacity is = 0 the original edge is no longer available.
-    //If an edge's capacity is full, the inverted edge is not available.
-    //When an edge's original capacity decrease, the inverted capacity increase
-    // and vice versa.
-    int max_flow = 0;
-
-    node *sink = &g->nodes[g->super_sink_node_id];
-    node *source = &g->nodes[g->super_source_node_id];
-
-    while (bfs(g))
-    {
-        // Find maximum flow that can yoink through the path.
-        int path_max_flow = INT_MAX;
-        int node_id = sink->prev_node_id;
-        for (node *n = sink; n != source; n = &g->nodes[n->prev_node_id])
-        {
-            // todo: make better pls
-            for (edge *e = n->edges; e != NULL; e = e->next)
-            {
-                if (e->dst_node_id == node_id)
-                {
-                    if (e->capacity < path_max_flow)
-                    {
-                        path_max_flow = e->capacity;
-                    }
-                }
-            }
-            node_id = n->prev_node_id;
-        }
-        // !!update edge capacities!!
-
-        // snacks snax
-    }
 }
 
 /**
@@ -398,6 +370,55 @@ void print_bfs_result(graph *g)
     }
     printf("SOURCE | %5d | %5d\n", super_source.prev_node_id, super_source.dist);
     printf("  SINK | %5d | %5d\n", super_sink.prev_node_id, super_sink.dist);
+}
+
+void edmond_karp(graph *g)
+{
+    //Run BFS and log nodes used for the shortest path
+    //Decrease capacity of all used edges in a run, by one.
+    //When an edge's capacity is = 0 the original edge is no longer available.
+    //If an edge's capacity is full, the inverted edge is not available.
+    //When an edge's original capacity decrease, the inverted capacity increase
+    // and vice versa.
+    int max_flow = 0;
+
+    node *sink = &g->nodes[g->super_sink_node_id];
+    node *source = &g->nodes[g->super_source_node_id];
+
+    while (bfs(g))
+    {
+        //print_bfs_result(g);
+        printf("SINK: %d\n", sink->prev_node_id);
+        printf("SOURCE: %d\n", source->prev_node_id);
+
+        // Find maximum flow through the path (from node after super-sink until node before super-source)
+        int path_max_flow = INT_MAX;
+        for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
+        {
+            edge *e = n->used_edge;
+            if (e->capacity < path_max_flow)
+            {
+                path_max_flow = e->capacity;
+            }
+        }
+
+        max_flow += path_max_flow;
+
+        printf("Flow: ");
+        for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
+        {
+            printf("%d ", n->used_edge->dst_node_id);
+            edge *e = n->used_edge;
+            e->capacity -= max_flow;
+            if (e->inverted != NULL)
+            {
+                e->inverted->capacity += max_flow;
+            }
+        }
+        printf("\n");
+        printf("DA FLOW: %d\n", max_flow);
+        // !!update edge capacities!!
+    }
 }
 
 /**
@@ -519,7 +540,7 @@ int main(int argc, const char *argv[])
         return 1;
     }
 
-    bfs(graph);
+    edmond_karp(graph);
     print_bfs_result(graph);
 
     printf("\nSource node: %d\nSink node: %d\n", graph->super_source_node_id, graph->super_sink_node_id);
