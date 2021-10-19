@@ -2,12 +2,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <string.h>
 #include <limits.h>
 #include <sys/mman.h>
 
@@ -60,7 +58,7 @@ typedef struct queue
 typedef struct graph
 {
     node *nodes;
-    int total_node_count; // includes special nodes
+    int total_node_count; // includes super nodes
     int node_count;
     int edge_count;
     int super_source_node_id;
@@ -77,13 +75,11 @@ edge *new_edge(int capacity, int dst_node_id, edge *next)
     e->dst_node_id = dst_node_id;
     e->next = next;
     e->inverted = NULL;
-    e->is_inverted = false;
     return e;
 }
 
 /**
- * Adds an edge to the front of the linked list.
- * Adds to front insted of back because its more 
+ * Adds an edge to the front of the linked list insted of back because its more 
  * efficient and the list order is irelevant. 
  */
 edge *edge_add(edge **edges, int dst_node_id, int capacity)
@@ -192,6 +188,9 @@ void queue_free(queue *q)
     free(q);
 }
 
+/**
+* Creates inverted edges 
+*/
 void graph_populate_inverted_edges(graph *g)
 {
     for (int i = 0; i < g->node_count; i++)
@@ -199,22 +198,21 @@ void graph_populate_inverted_edges(graph *g)
         node *src_node = &g->nodes[i];
         for (edge *e = src_node->edges; e; e = e->next)
         {
-            bool has_inverted = false;
+            bool has_inverted_edge = false;
             node *dst_node = &g->nodes[e->dst_node_id];
             for (edge *e = dst_node->edges; e; e = e->next)
             {
                 if (e->dst_node_id == i)
                 {
-                    has_inverted = true;
+                    has_inverted_edge = true;
                     break;
                 }
             }
 
-            if (!has_inverted)
+            if (!has_inverted_edge)
             {
                 edge *inv_edge = edge_add(&dst_node->edges, i, 0);
                 inv_edge->is_inverted = true;
-                printf("NODE %4d -> NODE %6d | INODE %6d -> INODE %6d\n", i, e->dst_node_id, e->dst_node_id, inv_edge->dst_node_id);
                 e->inverted = inv_edge;
                 inv_edge->inverted = e;
             }
@@ -222,6 +220,9 @@ void graph_populate_inverted_edges(graph *g)
     }
 }
 
+/**
+* Creates one super source for each graph
+*/
 void graph_create_super_source(graph *g)
 {
     node *super_source = &g->nodes[g->super_source_node_id];
@@ -245,6 +246,9 @@ void graph_create_super_source(graph *g)
     }
 }
 
+/**
+* Creates one super sink for each graph
+*/
 void graph_create_super_sink(graph *g)
 {
     for (int i = 0; i < g->node_count; i++)
@@ -372,25 +376,20 @@ void print_bfs_result(graph *g)
     printf("  SINK | %5d | %5d\n", super_sink.prev_node_id, super_sink.dist);
 }
 
+/**
+* Edmond Karp algorithm
+*/
+
 void edmond_karp(graph *g)
 {
-    //Run BFS and log nodes used for the shortest path
-    //Decrease capacity of all used edges in a run, by one.
-    //When an edge's capacity is = 0 the original edge is no longer available.
-    //If an edge's capacity is full, the inverted edge is not available.
-    //When an edge's original capacity decrease, the inverted capacity increase
-    // and vice versa.
     int max_flow = 0;
 
     node *sink = &g->nodes[g->super_sink_node_id];
     node *source = &g->nodes[g->super_source_node_id];
 
+    printf("Increase | Flow path\n");
     while (bfs(g))
     {
-        //print_bfs_result(g);
-        printf("SINK: %d\n", sink->prev_node_id);
-        printf("SOURCE: %d\n", source->prev_node_id);
-
         // Find maximum flow through the path (from node after super-sink until node before super-source)
         int path_max_flow = INT_MAX;
         for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
@@ -404,21 +403,32 @@ void edmond_karp(graph *g)
 
         max_flow += path_max_flow;
 
-        printf("Flow: ");
+        // Update capacity and store visited node ids
+        int *node_ids = calloc(sink->dist, sizeof(int));
+        int i = sink->dist - 1;
         for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
         {
-            printf("%d ", n->used_edge->dst_node_id);
             edge *e = n->used_edge;
-            e->capacity -= max_flow;
+            node_ids[i--] = e->dst_node_id;
+            e->capacity -= path_max_flow;
             if (e->inverted != NULL)
             {
-                e->inverted->capacity += max_flow;
+                e->inverted->capacity += path_max_flow;
             }
         }
+
+        // Print node ids
+        printf("%8d | ", path_max_flow);
+        for (int i = 0; i < sink->dist; i++)
+        {
+            printf("%d ", node_ids[i]);
+        }
         printf("\n");
-        printf("DA FLOW: %d\n", max_flow);
-        // !!update edge capacities!!
+
+        free(node_ids);
     }
+
+    printf("Max flow: %d\n", max_flow);
 }
 
 /**
@@ -502,7 +512,7 @@ graph *parse_graphfile(const char *graphfile)
             continue;
 
         int edge_capacity = atoi(&data[i]);
-        //printf("%d, %d, %d\n", node_id, edge_dst_id, edge_capacity);
+
         if (node_id < node_count && edge_dst_id < node_count)
         {
             node *n = &g->nodes[node_id];
@@ -541,9 +551,6 @@ int main(int argc, const char *argv[])
     }
 
     edmond_karp(graph);
-    print_bfs_result(graph);
-
-    printf("\nSource node: %d\nSink node: %d\n", graph->super_source_node_id, graph->super_sink_node_id);
 
     graph_free(graph);
 
