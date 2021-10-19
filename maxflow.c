@@ -359,24 +359,6 @@ bool bfs(graph *g)
 }
 
 /**
- * Prints the results of BFS.
- */
-void print_bfs_result(graph *g)
-{
-    node super_source = g->nodes[g->super_source_node_id];
-    node super_sink = g->nodes[g->super_sink_node_id];
-
-    printf("%-6s | %-5s | %-5s\n", "Node", "Prev", "Dist");
-    for (int i = 0; i < g->node_count; i++)
-    {
-        node *n = &g->nodes[i];
-        printf("%6d | %5d | %5d\n", i, n->prev_node_id, n->dist);
-    }
-    printf("SOURCE | %5d | %5d\n", super_source.prev_node_id, super_source.dist);
-    printf("  SINK | %5d | %5d\n", super_sink.prev_node_id, super_sink.dist);
-}
-
-/**
 * Edmond Karp algorithm
 */
 
@@ -421,7 +403,7 @@ void edmond_karp(graph *g)
         printf("%8d | ", path_max_flow);
         for (int i = 0; i < sink->dist; i++)
         {
-            printf("%d ", node_ids[i]);
+            printf("%2d ", node_ids[i]);
         }
         printf("\n");
 
