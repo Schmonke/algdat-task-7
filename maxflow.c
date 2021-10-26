@@ -189,20 +189,25 @@ void queue_free(queue *q)
 }
 
 /**
-* Creates inverted edges 
+* Creates adn adds inverted edges to each node in the specified graph.
+*
+* If we recognize an already exisiting inverted edge when looping through
+* each node's edges, then that inverted edge is coupled to the node's
+* inverted edges list.
+* Else a new inverted edge is created and its capacity defaults to 0.
 */
 void graph_populate_inverted_edges(graph *g)
 {
-    for (int i = 0; i < g->node_count; i++) //Node_id som i: 0 til 7
+    for (int i = 0; i < g->node_count; i++)
     {
-        node *src_node = &g->nodes[i]; // i = 4 som gir node 4
-        for (edge *src_edge = src_node->edges; src_edge; src_edge = src_edge->next) // ->3 og ->5
+        node *src_node = &g->nodes[i];
+        for (edge *src_edge = src_node->edges; src_edge; src_edge = src_edge->next)
         {
             bool has_inverted_edge = false;
-            node *dst_node = &g->nodes[src_edge->dst_node_id]; // node 3 og node 5
-            for (edge *dst_edge = dst_node->edges; dst_edge; dst_edge = dst_edge->next) // ->4, ->5, ->6 | ->6
+            node *dst_node = &g->nodes[src_edge->dst_node_id];
+            for (edge *dst_edge = dst_node->edges; dst_edge; dst_edge = dst_edge->next)
             {
-                if (dst_edge->dst_node_id == i) // Hvis 4 = i (som er sant)
+                if (dst_edge->dst_node_id == i) 
                 {
                     has_inverted_edge = true;
                     src_edge->inverted = dst_edge;
@@ -335,7 +340,6 @@ bool bfs(graph *g)
         n->visited = true;
 
         // look over edges and push to queue
-        // TODO: check how much capacity is left :- )
         for (edge *e = n->edges; e; e = e->next) //Stops when all edges of a node are visited.
         {
             if (e->capacity <= 0)
@@ -362,7 +366,6 @@ bool bfs(graph *g)
 /**
 * Edmond Karp algorithm
 */
-
 void edmond_karp(graph *g)
 {
     int max_flow = 0;
@@ -392,17 +395,9 @@ void edmond_karp(graph *g)
         for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
         {
             edge *e = n->used_edge;
-            printf("Kap update: %d from %d ", e->dst_node_id, e->capacity);
             node_ids[i--] = e->dst_node_id;
             e->capacity -= path_max_flow;
-            printf("to %d ", e->capacity);
-            if (e->inverted != NULL)
-            {
-                printf("with inverted from %d ", e->inverted->capacity);
-                e->inverted->capacity += path_max_flow;
-                printf("to %d ", e->inverted->capacity);
-            }
-            printf("\n");
+            if (e->inverted != NULL) e->inverted->capacity += path_max_flow;
         }
 
         // Print node ids
