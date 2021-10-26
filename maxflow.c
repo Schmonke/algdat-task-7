@@ -193,18 +193,19 @@ void queue_free(queue *q)
 */
 void graph_populate_inverted_edges(graph *g)
 {
-    for (int i = 0; i < g->node_count; i++)
+    for (int i = 0; i < g->node_count; i++) //Node_id som i: 0 til 7
     {
-        node *src_node = &g->nodes[i];
-        for (edge *e = src_node->edges; e; e = e->next)
+        node *src_node = &g->nodes[i]; // i = 4 som gir node 4
+        for (edge *src_edge = src_node->edges; src_edge; src_edge = src_edge->next) // ->3 og ->5
         {
             bool has_inverted_edge = false;
-            node *dst_node = &g->nodes[e->dst_node_id];
-            for (edge *e = dst_node->edges; e; e = e->next)
+            node *dst_node = &g->nodes[src_edge->dst_node_id]; // node 3 og node 5
+            for (edge *dst_edge = dst_node->edges; dst_edge; dst_edge = dst_edge->next) // ->4, ->5, ->6 | ->6
             {
-                if (e->dst_node_id == i)
+                if (dst_edge->dst_node_id == i) // Hvis 4 = i (som er sant)
                 {
                     has_inverted_edge = true;
+                    src_edge->inverted = dst_edge;
                     break;
                 }
             }
@@ -213,8 +214,8 @@ void graph_populate_inverted_edges(graph *g)
             {
                 edge *inv_edge = edge_add(&dst_node->edges, i, 0);
                 inv_edge->is_inverted = true;
-                e->inverted = inv_edge;
-                inv_edge->inverted = e;
+                src_edge->inverted = inv_edge;
+                inv_edge->inverted = src_edge;
             }
         }
     }
@@ -391,12 +392,17 @@ void edmond_karp(graph *g)
         for (node *n = &g->nodes[sink->prev_node_id]; n != source; n = &g->nodes[n->prev_node_id])
         {
             edge *e = n->used_edge;
+            printf("Kap update: %d from %d ", e->dst_node_id, e->capacity);
             node_ids[i--] = e->dst_node_id;
             e->capacity -= path_max_flow;
+            printf("to %d ", e->capacity);
             if (e->inverted != NULL)
             {
+                printf("with inverted from %d ", e->inverted->capacity);
                 e->inverted->capacity += path_max_flow;
+                printf("to %d ", e->inverted->capacity);
             }
+            printf("\n");
         }
 
         // Print node ids
